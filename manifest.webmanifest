@@ -1,0 +1,1 @@
+{"name":"WMDebugger","short_name":"WMDebugger","description":"Unity 运行时远程调试工具","start_url":".","display":"standalone","background_color":"#f3f4f6","theme_color":"#111827","lang":"en","scope":"/wmdebugger/","icons":[{"src":"icon.png","sizes":"512x512","type":"image/png","purpose":"any"}]}
