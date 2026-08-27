@@ -67,8 +67,6 @@ docker run -d \
   --restart unless-stopped \
   -p 5800:5800 \
   -p 5801:5801 \
-  -e HTTP_PORT=5800 \
-  -e HTTPS_PORT=5801 \
   -e LOG_LEVEL=info \
   -v wm-debugger-data:/root/.wm-debugger \
   wm-debugger-server:<version>
@@ -82,8 +80,6 @@ docker run -d `
   --restart unless-stopped `
   -p 5800:5800 `
   -p 5801:5801 `
-  -e HTTP_PORT=5800 `
-  -e HTTPS_PORT=5801 `
   -e LOG_LEVEL=info `
   -v wm-debugger-data:/root/.wm-debugger `
   wm-debugger-server:<version>
@@ -95,12 +91,10 @@ docker run -d `
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `HTTP_PORT` | `5800` | HTTP、WebSocket 和内置管理页面共用的容器端口 |
-| `HTTPS_PORT` | `HTTP_PORT + 1` | HTTPS 和安全 WebSocket 共用的容器端口；只有上传证书后才会监听 |
 | `LOG_LEVEL` | `info` | Server 日志级别，例如 `debug`、`info`、`warn`、`error` |
 | `/root/.wm-debugger` | — | Server 数据目录，保存 RSA 私钥、HTTPS 证书和项目配置，必须挂载持久化卷 |
 
-`-p` 左侧是宿主机端口，右侧必须与容器中的环境变量一致。例如想通过宿主机 `8080` 访问 Server，可以使用 `-p 8080:5800`，但仍保留 `HTTP_PORT=5800`；调试界面和 Unity 中填写宿主机的 `8080`。
+容器内监听端口固定为 HTTP `5800`、HTTPS `5801`，不支持环境变量修改。`-p` 左侧是宿主机端口，右侧必须是 `5800`/`5801`。例如想通过宿主机 `8080` 访问 Server，可以使用 `-p 8080:5800`；调试界面和 Unity 中填写宿主机的 `8080`。
 
 启动后检查状态：
 
@@ -134,7 +128,7 @@ Server 使用 RSA 密钥证明自己的身份，Unity 客户端只接受持有�
 
 1. 将域名解析到 Server，并放通映射后的 HTTP/HTTPS 端口。
 2. 先通过可信网络进入“设置 → 服务配置 → HTTPS 证书”。
-3. 上传匹配的私钥和证书，Server 会立即启用 `HTTPS_PORT`。
+3. 上传匹配的私钥和证书，Server 会立即启用 HTTPS 端口（`5801`）。
 4. 后续调试界面使用 `https://<域名>:<HTTPS端口>`，Unity 调用 `Debugger.Start` 时将 `serverHttps` 设为 `true`，并传入 HTTPS 端口。
 
 浏览器从 HTTPS 页面连接 Server 时，Server 也必须使用 HTTPS，否则浏览器会阻止不安全的 HTTP/WebSocket 混合内容。Server 当前不提供用户账号或访问令牌认证，不应直接暴露到公网；请通过防火墙、VPN 或带访问控制的反向代理限制访问范围。WMDebugger 的运行时修改、方法调用、GM 和输入模拟都属于高权限操作。
@@ -156,6 +150,15 @@ YourUnityProject/
 等待 Unity 完成导入和编译。不要只复制 `Runtime` 目录，压缩包最外层的 `com.wm.debugger` 就是完整 Package。
 
 当前 Package 的 `WMDebugger.asmdef` 直接引用 `Wx` 和 `TTWebGL`，用于微信与抖音小游戏适配。接入工程需要提供这两个程序集；如果项目不使用对应小游戏 SDK，请先根据项目的平台依赖调整 asmdef，否则 Unity 会报告程序集引用不存在。
+
+构建抖音小游戏或微信小游戏平台时，还需要在 Player Settings（或对应的构建脚本）中定义宏：
+
+| 平台 | 宏定义 |
+| --- | --- |
+| 抖音小游戏 | `WM_DYMINI` |
+| 微信小游戏 | `WM_WXMINI` |
+
+定义宏后，目录浏览、文件读写和偏好设置会改用对应小游戏 SDK（`TTSDK` / `WeChatWASM`）的文件系统与存储接口；未定义宏时使用默认实现。编辑器下始终使用默认实现，宏只在真机构建生效。两个宏不要同时定义。
 
 ### 2.2 启动调试连接
 
@@ -224,6 +227,30 @@ UGUI 输入模拟默认开启，并会真实改变客户端状态。正式环境
 ```csharp
 Debugger.EnableInputSimulation = false;
 ```
+
+### 2.4 接收 Server 运行时配置
+
+调试界面的“Unity配置”按 `Application.identifier` 保存 JSON 对象。Unity 验证 Server 并登录后会自动收到当前配置；前端再次保存或清空时，在线客户端也会立即更新。回调在 Unity 主线程执行：
+
+WMDebugger 当前内置 `SnapshotGzipEnabled` 快照配置，控制是否使用 GZIP，默认为 `true`：
+
+```json
+{
+  "SnapshotGzipEnabled": true
+}
+```
+
+```csharp
+void ApplyDebuggerConfig(RuntimeConfig config)
+{
+    Debug.Log($"快照 GZIP：{config.SnapshotGzipEnabled}");
+}
+
+Debugger.RuntimeConfigChanged += ApplyDebuggerConfig;
+Debugger.Start("127.0.0.1", 5800, "复制的公钥");
+```
+
+当前配置对象始终可以通过 `Debugger.RuntimeConfig` 读取。建议先订阅事件再调用 `Debugger.Start`。
 
 建议只在开发、测试或明确授权的诊断构建中启用 WMDebugger，并按项目需要限制可执行的 GM 命令和可修改成员。
 
